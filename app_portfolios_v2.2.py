@@ -20,33 +20,48 @@ def _apply_state_snapshot(snap: dict):
     """Aplica un snapshot al estado actual (defensivo)."""
     try:
         st.session_state._restore_guard = True  # evita loops al setear query params
-        # Globales (los widgets usan estos keys)
-        if "rango" in snap: st.session_state["rango"] = snap["rango"]
-        if "intervalo" in snap: st.session_state["intervalo_raw"] = snap["intervalo"]
-        if "benchmark" in snap: st.session_state["benchmark"] = snap["benchmark"]
-        if "use_dates" in snap: st.session_state["use_dates"] = snap["use_dates"]
-        if "fill_gaps" in snap: st.session_state["fill_gaps"] = snap["fill_gaps"]
-        # Fechas
+        
+        # Solo aplicar si los valores son diferentes (evita resets innecesarios)
+        if "rango" in snap and st.session_state.get("rango") != snap["rango"]:
+            st.session_state["rango"] = snap["rango"]
+        if "intervalo" in snap and st.session_state.get("intervalo_raw") != snap["intervalo"]:
+            st.session_state["intervalo_raw"] = snap["intervalo"]
+        if "benchmark" in snap and st.session_state.get("benchmark") != snap["benchmark"]:
+            st.session_state["benchmark"] = snap["benchmark"]
+        if "use_dates" in snap and st.session_state.get("use_dates") != snap["use_dates"]:
+            st.session_state["use_dates"] = snap["use_dates"]
+        if "fill_gaps" in snap and st.session_state.get("fill_gaps") != snap["fill_gaps"]:
+            st.session_state["fill_gaps"] = snap["fill_gaps"]
+            
+        # Fechas - solo si use_dates está activo
         if snap.get("use_dates", False):
-            if snap.get("start"): st.session_state["start_str"] = snap["start"]
-            if snap.get("end"):   st.session_state["end_str"] = snap["end"]
-        # Portafolios
+            if snap.get("start") and st.session_state.get("start_str") != snap["start"]:
+                st.session_state["start_str"] = snap["start"]
+            if snap.get("end") and st.session_state.get("end_str") != snap["end"]:
+                st.session_state["end_str"] = snap["end"]
+                
+        # Portafolios - solo si hay cambios significativos
         if snap.get("portfolios"):
-            st.session_state.portfolios = []
-            for item in snap["portfolios"][:6]:
-                st.session_state.portfolios.append({
-                    "name": item.get("name", "Cartera"),
-                    "text": item.get("text", "# TICKER, peso\n")
-                })
+            current_portfolios = st.session_state.get("portfolios", [])
+            if len(current_portfolios) != len(snap["portfolios"]) or \
+               any(current_portfolios[i].get("text", "") != snap["portfolios"][i].get("text", "") 
+                   for i in range(min(len(current_portfolios), len(snap["portfolios"])))):
+                st.session_state.portfolios = []
+                for item in snap["portfolios"][:6]:
+                    st.session_state.portfolios.append({
+                        "name": item.get("name", "Cartera"),
+                        "text": item.get("text", "# TICKER, peso\n")
+                    })
     finally:
         st.session_state._restore_guard = False
 
 params = st.query_params
-if "s" in params:
+if "s" in params and not st.session_state.get("_initialized", False):
     snap = _decode_snapshot_from_url(params["s"])
     if "portfolios" not in st.session_state:
         st.session_state.portfolios = []
     _apply_state_snapshot(snap)
+    st.session_state._initialized = True
 
 # ---------------- Mini base de tickers CL (IPSA-ish) ----------------
 CL_TICKERS = [
@@ -318,10 +333,12 @@ with st.sidebar:
     if st.button("🔄 Resetear app (valores iniciales)", type="secondary"):
         # Limpiar la URL removiendo todos los parámetros
         st.query_params.clear()
-        # Limpiar el session state (excepto _restore_guard)
-        keys_to_remove = [k for k in st.session_state.keys() if k != "_restore_guard"]
+        # Limpiar el session state (mantener solo las guardas necesarias)
+        keys_to_remove = [k for k in st.session_state.keys() if k not in ["_restore_guard", "_initialized"]]
         for key in keys_to_remove:
             del st.session_state[key]
+        # Resetear la bandera de inicialización para permitir nueva carga
+        st.session_state._initialized = False
         st.success("App reseteada a valores iniciales.")
         st.rerun()
 
@@ -339,7 +356,10 @@ with st.sidebar:
     if up is not None:
         try:
             imported = json.loads(up.read().decode("utf-8"))
+            # Limpiar query params antes de importar para evitar conflictos
+            st.query_params.clear()
             _apply_state_snapshot(imported)
+            st.session_state._initialized = True
             st.success("Estado importado. Ya puedes seguir donde quedaste.")
             st.rerun()
         except Exception:
@@ -387,9 +407,9 @@ st.caption("💡 Los gráficos muestran **índice base 100** (rendimiento relati
 st.divider()
 
 # ============================================================
-# 🔀 TABS: Aprende / Cómo invertir / Portafolios
+# 🔀 TABS: Aprende / Guía técnica / Portafolios
 # ============================================================
-tab_aprende, tab_invertir, tab_portafolios = st.tabs(["📘 Aprende", "🧭 Cómo invertir", "📊 Portafolios"])
+tab_aprende, tab_guia, tab_portafolios = st.tabs(["📘 Aprende", "🧩 Guía técnica de uso", "📊 Portafolios"])
 
 # ============================================================
 # 📘 TAB 1: Contenido educativo + ejemplo AAPL vs ^GSPC
@@ -417,7 +437,8 @@ with tab_aprende:
 
 💡 *Tip: El enlace se actualiza automáticamente mientras trabajas. Usa "Resetear app" para empezar limpio en cualquier momento.*    
 
----
+
+                ---
 ### 1️⃣ Explora los datos sin miedo
 - Cambia **rango** (3m, 6m, 1y, 5y, max).
 - Ajusta **intervalo** (`1d`, `1wk`, `1mo`).
@@ -573,38 +594,42 @@ with tab_aprende:
 # ============================================================
 # 🧭 TAB 2: Guía práctica + carteras demo
 # ============================================================
-with tab_invertir:
-    st.markdown("## 🧭 Cómo invertir (guía práctica para personas naturales)")
-    st.info("Esta guía es educativa y no es asesoría financiera. Revisa siempre costos, impuestos y regulaciones con tu corredor local.")
+with tab_guia:
+    st.subheader("🧩 Guía técnica de uso de la herramienta")
+    st.info(
+        "Esta sección explica cómo aprovechar las funciones analíticas de la app. "
+        "No constituye asesoría financiera ni recomendación de inversión."
+    )
 
     st.markdown("""
-### 1) Antes de poner plata
-- **Fondo de emergencia**: 3–6 meses de gastos.
-- **Objetivo y plazo**: casa, viaje, retiro; corto vs. largo.
-- **Tolerancia al riesgo**: si te estresas con -20%, usa mezcla más conservadora.
+### 1) Objetivo general
+Esta herramienta permite **analizar, comparar y simular carteras de inversión** usando datos reales de mercado.
+Su propósito es educativo y analítico: entender cómo se comportan los portafolios ante diferentes combinaciones de activos.
 
-### 2) Por dónde partir (simple y efectivo)
-- Índices amplios (SPY/VOO/IVV) + mercado local (^IPSA, acciones .SN) para diversificar.
-- **Costos bajos**: prefiere ETFs/fondos con bajas comisiones.
-- **Aportes periódicos (DCA)**: mismo monto cada mes, sin tratar de adivinar el mercado.
+### 2) Flujo de trabajo recomendado
+1. **Buscar tickers:** usa el buscador para obtener datos de ETFs, acciones o índices (ej. `VOO`, `^GSPC`, `^IPSA`).
+2. **Crear carteras:** combina varios activos asignando pesos (%) personalizados.
+3. **Comparar carteras:** analiza rentabilidad, riesgo y correlación frente a benchmarks o entre sí.
+4. **Guardar y restaurar:** exporta tu sesión como JSON o genera un link para continuar luego.
 
-### 3) Cómo armar tu mezcla
-- Conservadora: 70% VOO/IVV, 30% ^IPSA.
-- Balanceada: 60% USA (VOO/VTI) / 20% Tech (QQQ/XLK) / 20% CL.
-- Agresiva: 70% USA (VOO/VTI/QQQ) / 30% sectores (XLE/XLV/XLF) o temáticos.
+### 3) Funciones principales
+- **Descarga automática:** los precios se obtienen desde Yahoo Finance en tiempo real (ajustados por splits y dividendos).
+- **Visualización:** gráficos interactivos de rendimiento, drawdown y composición del portafolio.
+- **Indicadores:** métricas como retorno anualizado, volatilidad, Sharpe ratio y correlaciones.
+- **Persistencia:** la app guarda el estado en la URL o en un snapshot JSON.
 
-### 4) Reglas simples
-- **Rebalanceo**: 1–2 veces al año.
-- Evita **concentraciones** >25% salvo decisión consciente.
-- No persigas modas; revisa fundamentos.
-- Considera **impuestos y comisiones**.
+### 4) Buenas prácticas de uso
+- Verifica los tickers (algunos mercados usan sufijos como `.SN` o `.MX`).
+- Mantén pesos que sumen 100% para resultados coherentes.
+- Repite los análisis en distintos horizontes temporales (1, 3, 5 años) para evaluar consistencia.
+- Actualiza manualmente si cambian tus datos base.
 
-### 5) Usa esta app
-1. Busca tickers.
-2. Arma 2–3 carteras.
-3. Compáralas contra un benchmark (^IPSA o ^GSPC).
-4. Guarda tu estado (link/JSON) y vuelve luego.
+### 5) Próximas funcionalidades (roadmap)
+- Integración con APIs locales (p. ej. BICE, Renta4, BTG).  
+- Reportes PDF automáticos.  
+- Módulo de optimización de portafolios (mínima varianza y frontera eficiente).  
 """)
+
 
     st.markdown("---")
     st.markdown("### 🚀 Crear carteras demo (1 clic)")
@@ -660,16 +685,22 @@ with tab_portafolios:
 
     # Presets iniciales (editables)
     default_portfolios = {
-        "Bancos CL": "BSANTANDER.SN, 0.35\nCHILE.SN, 0.35\nITAUCL.SN, 0.30\n",
-        "IPSA ejemplo": "FALABELLA.SN, 0.15\nSQM-B.SN, 0.15\nCOPEC.SN, 0.15\nENELAM.SN, 0.15\nCAP.SN, 0.10\nCENCOSUD.SN, 0.10\nBCI.SN, 0.10\nPARAUCO.SN, 0.10\n",
-        "USA Tech": "AAPL, 0.30\nMSFT, 0.30\nNVDA, 0.20\nGOOGL, 0.20\n"
-    }
+    "Bancos CL": "BSANTANDER.SN, 0.35\nCHILE.SN, 0.35\nITAUCL.SN, 0.30\n",
+    "Energía CL": "ENELAM.SN, 0.25\nENELCHILE.SN, 0.25\nCOLBUN.SN, 0.25\nAESGENER.SN, 0.25\n",
+    "Retail CL": "CENCOSUD.SN, 0.25\nFALABELLA.SN, 0.25\nRIPLEY.SN, 0.25\nPARAUCO.SN, 0.25\n",
+    "Infraestructura CL": "SALFACORP.SN, 0.25\nSOCOVESA.SN, 0.25\nCINTAC.SN, 0.25\nMADECO.SN, 0.25\n",
+    "Mineras CL": "SQM-B.SN, 0.40\nCAP.SN, 0.30\nANTAISA.SN, 0.15\nIAM.SN, 0.15\n",
+    "Telecom y Transporte CL": "ENTEL.SN, 0.40\nLATAM.SN, 0.30\nCCU.SN, 0.20\nNAVARINO.SN, 0.10\n",
+    "IPSA ejemplo": "FALABELLA.SN, 0.15\nSQM-B.SN, 0.15\nCOPEC.SN, 0.15\nENELAM.SN, 0.15\nCAP.SN, 0.10\nCENCOSUD.SN, 0.10\nBCI.SN, 0.10\nPARAUCO.SN, 0.10\n",
+    "USA Tech": "AAPL, 0.30\nMSFT, 0.30\nNVDA, 0.20\nGOOGL, 0.20\n"
+}
+
 
     n = st.number_input("¿Cuántas carteras quieres analizar a la vez?", min_value=1, max_value=6, value=3, step=1)
 
     if "portfolios" not in st.session_state or not st.session_state.portfolios:
         st.session_state.portfolios = []
-        for name, txt in list(default_portfolios.items())[:3]:
+        for name, txt in list(default_portfolios.items())[:6]:
             st.session_state.portfolios.append({"name": name, "text": txt})
     while len(st.session_state.portfolios) < n:
         st.session_state.portfolios.append({"name": f"Cartera {len(st.session_state.portfolios)+1}", "text": "# TICKER, peso\n"})
@@ -777,14 +808,6 @@ with tab_portafolios:
                 key=f"dl_{idx}"
             )
 
-            # ———— Auto-actualizar query param con el estado actual ————
-            if not st.session_state.get("_restore_guard", False):
-                try:
-                    b64 = _encode_snapshot_to_url(_get_state_snapshot())
-                    st.query_params["s"] = b64
-                except Exception:
-                    pass
-
             all_series.append((st.session_state.portfolios[idx]["name"], port_series))
 
     # --------- Comparador global (todas las carteras) ---------
@@ -820,3 +843,16 @@ with tab_portafolios:
         st.plotly_chart(fig_all, use_container_width=True)
     else:
         st.info("Agrega al menos una cartera para comparar.")
+
+# ———— Auto-actualizar query param con el estado actual (una sola vez al final) ————
+if not st.session_state.get("_restore_guard", False) and st.session_state.get("_initialized", False):
+    try:
+        current_snapshot = _get_state_snapshot()
+        new_b64 = _encode_snapshot_to_url(current_snapshot)
+        
+        # Solo actualizar si realmente cambió algo significativo
+        current_b64 = st.query_params.get("s", "")
+        if new_b64 != current_b64:
+            st.query_params["s"] = new_b64
+    except Exception:
+        pass

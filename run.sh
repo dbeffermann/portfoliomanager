@@ -1,0 +1,1 @@
+streamlit run app_portfolios_v2.py --server.address 0.0.0.0 --server.port 8501 --server.headless true
