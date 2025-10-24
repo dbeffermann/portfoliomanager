@@ -97,7 +97,9 @@ CL_TICKERS = [
     ("SQM-B.SN", "SQM-B"),
 
     # ─────────────────── Benchmarks CL ───────────────────
-    ("^IPSA", "IPSA (Chile)"),
+    ("ECH", "iShares MSCI Chile ETF"),
+    ("ILF", "iShares Latin America 40 ETF"),
+    ("^IPSA", "IPSA (Chile) - datos limitados"),
     ("^SPCLXIPSA", "IPSA (alternate)"),
 
     # ─────────────────── Acciones globales ───────────────
@@ -187,11 +189,30 @@ def load_prices(tickers, period=None, interval="1d", start=None, end=None, fill_
         if df.empty:
             continue
 
-        # Normaliza a columna 'Close'
-        if "Close" not in df.columns and "Adj Close" in df.columns:
-            df["Close"] = df["Adj Close"]
+        # Verificar que tengamos suficientes datos (al menos 5 días para períodos de 1 mes o más)
+        min_expected_days = 5 if period in ["1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "max"] else 1
+        if len(df) < min_expected_days:
+            continue
 
-        s = df["Close"].copy()
+        # Manejar estructura de columnas (MultiIndex vs simples)
+        if len(df.columns.names) > 1:  # MultiIndex
+            # Buscar columna Close en MultiIndex
+            close_col = None
+            for col in df.columns:
+                if 'Close' in str(col):
+                    close_col = col
+                    break
+            if close_col is None:
+                continue
+            s = df[close_col].copy()
+        else:
+            # Normaliza a columna 'Close'
+            if "Close" not in df.columns and "Adj Close" in df.columns:
+                df["Close"] = df["Adj Close"]
+            elif "Close" not in df.columns:
+                continue
+            s = df["Close"].copy()
+
         if fill_gaps:
             s = s.replace(0, np.nan).ffill()
 
@@ -309,7 +330,7 @@ def _get_state_snapshot():
     return {
         "rango": st.session_state.get("rango", "1y"),
         "intervalo": st.session_state.get("intervalo_raw", "1d"),
-        "benchmark": st.session_state.get("benchmark", "^IPSA"),
+        "benchmark": st.session_state.get("benchmark", "ECH"),
         "use_dates": st.session_state.get("use_dates", False),
         "start": st.session_state.get("start_str", "") or "",
         "end": st.session_state.get("end_str", "") or "",
@@ -377,7 +398,7 @@ with c1:
 with c2:
     intervalo_raw = st.selectbox("Intervalo", ["1d","1wk","1mo"], index=0, key="intervalo_raw")
 with c3:
-    benchmark = st.text_input("Benchmark (p.ej. ^IPSA, ^GSPC)", st.session_state.get("benchmark", "^IPSA"), key="benchmark")
+    benchmark = st.text_input("Benchmark (p.ej. ECH, ^GSPC, SPY)", st.session_state.get("benchmark", "ECH"), key="benchmark")
 with c4:
     usar_log = st.toggle("Escala log", value=False, key="usar_log")
 
@@ -404,6 +425,11 @@ else:
 intervalo = choose_interval(rango, intervalo_raw)
 
 st.caption("💡 Los gráficos muestran **índice base 100** (rendimiento relativo), no montos en CLP o USD.")
+
+# Información sobre benchmarks
+if st.session_state.get("benchmark", "ECH") == "^IPSA":
+    st.info("ℹ️ **Nota sobre ^IPSA**: Yahoo Finance tiene datos limitados para este índice. Para mejor análisis, considera usar **ECH** (iShares Chile ETF) o **^GSPC** (S&P 500).")
+
 st.divider()
 
 # ============================================================
@@ -467,7 +493,7 @@ with tab_aprende:
 
 ---
 ### 4️⃣ Benchmark y comparación
-- Usa **^IPSA** (Chile) o **^GSPC** (S&P 500) para comparar.
+- Usa **ECH** (Chile ETF), **^GSPC** (S&P 500) o **SPY** para comparar.
 - Si tu cartera rinde más con menor volatilidad, vas ganando al mercado.
 - El gráfico comparativo te muestra todos los portafolios juntos.
 
@@ -696,7 +722,7 @@ with tab_portafolios:
 }
 
 
-    n = st.number_input("¿Cuántas carteras quieres analizar a la vez?", min_value=1, max_value=6, value=3, step=1)
+    n = st.number_input("¿Cuántas carteras quieres analizar a la vez?", min_value=1, max_value=9, value=6, step=1)
 
     if "portfolios" not in st.session_state or not st.session_state.portfolios:
         st.session_state.portfolios = []
@@ -757,7 +783,7 @@ with tab_portafolios:
 
             # Benchmark
             bench_prices = load_prices(
-                [st.session_state.get("benchmark", "^IPSA")],
+                [st.session_state.get("benchmark", "ECH")],
                 period=(None if st.session_state.get("use_dates", False) else st.session_state.get("rango", "1y")),
                 interval=choose_interval(st.session_state.get("rango", "1y"), st.session_state.get("intervalo_raw", "1d")),
                 start=(st.session_state.get("start_str") if st.session_state.get("use_dates", False) else None),
@@ -785,7 +811,7 @@ with tab_portafolios:
                                      name=f"{st.session_state.portfolios[idx]['name']} (base=100)", mode="lines"))
             if bench_series is not None:
                 fig.add_trace(go.Scatter(x=bench_series.index, y=bench_series.values,
-                                         name=f"Benchmark {st.session_state.get('benchmark', '^IPSA')}", mode="lines"))
+                                         name=f"Benchmark {st.session_state.get('benchmark', 'ECH')}", mode="lines"))
             fig.update_layout(
                 template="plotly_dark", height=520,
                 xaxis=dict(showgrid=True),
@@ -819,7 +845,7 @@ with tab_portafolios:
             fig_all.add_trace(go.Scatter(x=s.index, y=s.values, name=name, mode="lines"))
 
         bp = load_prices(
-            [st.session_state.get("benchmark", "^IPSA")],
+            [st.session_state.get("benchmark", "ECH")],
             period=(None if st.session_state.get("use_dates", False) else st.session_state.get("rango", "1y")),
             interval=choose_interval(st.session_state.get("rango", "1y"), st.session_state.get("intervalo_raw", "1d")),
             start=(st.session_state.get("start_str") if st.session_state.get("use_dates", False) else None),
@@ -831,7 +857,7 @@ with tab_portafolios:
             fv = bser.first_valid_index()
             if fv is not None:
                 bser = (bser / bser.loc[fv]) * 100.0
-                fig_all.add_trace(go.Scatter(x=bser.index, y=bser.values, name=f"Benchmark {st.session_state.get('benchmark','^IPSA')}", mode="lines"))
+                fig_all.add_trace(go.Scatter(x=bser.index, y=bser.values, name=f"Benchmark {st.session_state.get('benchmark','ECH')}", mode="lines"))
 
         fig_all.update_layout(
             template="plotly_dark", height=520,
