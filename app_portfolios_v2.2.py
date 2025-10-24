@@ -433,9 +433,8 @@ if st.session_state.get("benchmark", "ECH") == "^IPSA":
 st.divider()
 
 # ============================================================
-# 🔀 TABS: Aprende / Guía técnica / Portafolios
+# � BUSCADOR Y PORTAFOLIOS
 # ============================================================
-tab_aprende, tab_guia, tab_portafolios = st.tabs(["📘 Aprende", "🧩 Guía técnica de uso", "📊 Portafolios"])
 
 # ============================================================
 # 📘 TAB 1: Contenido educativo + ejemplo AAPL vs ^GSPC
@@ -464,7 +463,7 @@ with tab_aprende:
 💡 *Tip: El enlace se actualiza automáticamente mientras trabajas. Usa "Resetear app" para empezar limpio en cualquier momento.*    
 
 
-                ---
+---
 ### 1️⃣ Explora los datos sin miedo
 - Cambia **rango** (3m, 6m, 1y, 5y, max).
 - Ajusta **intervalo** (`1d`, `1wk`, `1mo`).
